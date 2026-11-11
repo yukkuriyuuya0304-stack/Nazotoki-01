@@ -226,7 +226,7 @@ document.getElementById("submit-question-btn").addEventListener("click", async (
     }
 });
 
-// --- パック（作成したカテゴリ）画面 ---
+// --- パック選択画面 ---
 document.getElementById("btn-to-pack").addEventListener("click", () => {
     const packs = [...new Set(allQuizData.map(q => q.packName).filter(Boolean))];
     packButtonsContainer.innerHTML = "";
@@ -353,6 +353,7 @@ modeReviewBtn.addEventListener("click", () => initMode('review'));
 // 問題の開始・再開
 function startQuestion(fromIndex = 0) {
     isBuzzed = false;
+    currentBuzzerPlayer = null;
     currentCharIndex = fromIndex;
     
     if (fromIndex === 0) {
@@ -369,7 +370,7 @@ function startQuestion(fromIndex = 0) {
     timerBar.classList.remove("timer-warning");
     nextCountdownText.classList.add("hidden");
     
-    // 💡 解答権の剥奪: 既にこの問題で間違えたプレイヤーはボタン無効化
+    // 解答権剥奪チェック
     if (isOnlineMode && roomDataCache && roomDataCache.answeredPlayers && roomDataCache.answeredPlayers.includes(myPlayerName)) {
         buzzerBtn.disabled = true;
     } else {
@@ -415,7 +416,7 @@ function showOptions() {
     const currentQuestion = activeQuizData[currentQuestionIndex];
     optionsContainer.innerHTML = "";
     const shuffledOptions = shuffleArray(currentQuestion.options);
-    shuffledOptions.forEach((option, index) => { // ⭕ 引数に (option, index) を指定
+    shuffledOptions.forEach((option, index) => {
         const btn = document.createElement("button");
         btn.textContent = `${index + 1}. ${option}`;
         btn.className = "option-btn";
@@ -454,14 +455,16 @@ function startTimer(durationMs, onTimeOut) {
     }, 50);
 }
 
-// 早押しボタン処理
-// 早押しボタン処理
-// 早押しボタン処理
+// 早押しボタン押下時
 buzzerBtn.addEventListener("click", async () => {
+    if (isBuzzed) return;
+    isBuzzed = true;
+    buzzerBtn.disabled = true;
+    clearInterval(textInterval);
+    clearInterval(answerTimer);
+
     if (isOnlineMode) {
-        if (!isBuzzed && currentRoomId) {
-            isBuzzed = true;
-            buzzerBtn.disabled = true;
+        if (currentRoomId) {
             try {
                 const roomRef = doc(db, "rooms", currentRoomId);
                 await updateDoc(roomRef, {
@@ -476,13 +479,7 @@ buzzerBtn.addEventListener("click", async () => {
             }
         }
     } else {
-        if (!isBuzzed) {
-            isBuzzed = true;
-            clearInterval(textInterval);
-            clearInterval(answerTimer);
-            buzzerBtn.disabled = true;
-            showOptions(); 
-        }
+        showOptions(); 
     }
 });
 
@@ -513,7 +510,6 @@ function handleTimeOut() {
                 const answered = data.answeredPlayers || [];
                 if (!answered.includes(myPlayerName)) answered.push(myPlayerName);
 
-                // 💡 減点ペナルティ計算（時間切れ時）
                 let currentScore = data.scores[myPlayerName] || 0;
                 if (data.settings?.penalty === "minus1") {
                     currentScore = Math.max(0, currentScore - 1);
@@ -576,7 +572,6 @@ async function checkAnswer(selectedOption) {
             if (isCorrect) {
                 updateData[`scores.${myPlayerName}`] = currentScore + 1;
             } else {
-                // 💡 減点ペナルティ計算（誤答時）
                 if (data.settings?.penalty === "minus1") {
                     updateData[`scores.${myPlayerName}`] = Math.max(0, currentScore - 1);
                 }
@@ -640,7 +635,6 @@ function recordWrongQuestion(question) {
     }
 }
 
-// オンライン自動進行
 function scheduleAutoNextQuestion() {
     clearTimeout(autoNextTimer);
     autoNextTimer = setTimeout(async () => {
@@ -967,29 +961,28 @@ function listenToRoom(roomId) {
 
         if (data.status === "playing" && data.currentQuestionIndex !== currentQuestionIndex) {
             currentQuestionIndex = data.currentQuestionIndex;
-            currentBuzzerPlayer = null;
             startQuestion(0);
             return;
         }
 
-        
-           if (data.status === "playing" && data.buzzerPlayer && !currentBuzzerPlayer) {
-    currentBuzzerPlayer = data.buzzerPlayer;
-    isBuzzed = true;
-    clearInterval(textInterval);
-    buzzerBtn.disabled = true;
+        // オンライン早押し検知処理（修正ポイント）
+        if (data.status === "playing" && data.buzzerPlayer && currentBuzzerPlayer !== data.buzzerPlayer) {
+            currentBuzzerPlayer = data.buzzerPlayer;
+            isBuzzed = true;
+            clearInterval(textInterval);
+            buzzerBtn.disabled = true;
 
-    if (currentBuzzerPlayer === myPlayerName) {
-        resultMessageEl.textContent = "🔔 あなたがボタンを押しました！解答を選んでください。";
-        resultMessageEl.style.color = "#007aff";
-        showOptions(); // ← ここで確実に呼び出す
-    } else {
-        resultMessageEl.textContent = `🔔 ${currentBuzzerPlayer} さんが早押しボタンを押しました！`;
-        resultMessageEl.style.color = "#ff9500";
-        optionsContainer.innerHTML = "";
-        optionsContainer.classList.add("hidden");
-    }
-}
+            if (currentBuzzerPlayer === myPlayerName) {
+                resultMessageEl.textContent = "🔔 あなたがボタンを押しました！解答を選んでください。";
+                resultMessageEl.style.color = "#007aff";
+                showOptions(); // 自分で押した場合に選択肢を表示
+            } else {
+                resultMessageEl.textContent = `🔔 ${currentBuzzerPlayer} さんが早押しボタンを押しました！`;
+                resultMessageEl.style.color = "#ff9500";
+                optionsContainer.innerHTML = "";
+                optionsContainer.classList.add("hidden");
+            }
+        }
 
         if (data.status === "playing" && data.lastAnswerResult) {
             const res = data.lastAnswerResult;
@@ -1057,31 +1050,18 @@ document.getElementById("leave-room-btn").addEventListener("click", () => {
     startScreen.classList.remove("hidden");
 });
 
-
-// ==========================================
-// ⌨️ キーボード操作（ショートカット機能）
-// ==========================================
+// キーボード操作
 document.addEventListener("keydown", (e) => {
-    // テキスト入力欄（名前入力や問題作成フォームなど）にフォーカスがある時はショートカットを無効化
-    if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) {
-        return;
-    }
+    if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) return;
 
-    // クイズ画面が表示中のみ動作
     if (!quizScreen.classList.contains("hidden")) {
-
-        // 1. 早押しボタン： Space キー または Enter キー
         if (e.code === "Space" || e.code === "Enter") {
-            e.preventDefault(); // 画面のスクロール等を防止
-            if (!buzzerBtn.disabled) {
-                buzzerBtn.click();
-            }
+            e.preventDefault();
+            if (!buzzerBtn.disabled) buzzerBtn.click();
         }
 
-        // 2. 4択選択肢： 数字キー 1, 2, 3, 4 (テンキー含む)
         if (!optionsContainer.classList.contains("hidden")) {
             const optionButtons = optionsContainer.querySelectorAll(".option-btn");
-            
             let selectedIndex = -1;
             if (e.code === "Digit1" || e.code === "Numpad1") selectedIndex = 0;
             if (e.code === "Digit2" || e.code === "Numpad2") selectedIndex = 1;
