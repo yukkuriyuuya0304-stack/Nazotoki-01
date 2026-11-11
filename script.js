@@ -415,7 +415,7 @@ function showOptions() {
     const currentQuestion = activeQuizData[currentQuestionIndex];
     optionsContainer.innerHTML = "";
     const shuffledOptions = shuffleArray(currentQuestion.options);
-    shuffledOptions.forEach(option => {
+    shuffledOptions.forEach((option, index) => { // ⭕ 引数に (option, index) を指定
         const btn = document.createElement("button");
         btn.textContent = `${index + 1}. ${option}`;
         btn.className = "option-btn";
@@ -454,6 +454,8 @@ function startTimer(durationMs, onTimeOut) {
     }, 50);
 }
 
+// 早押しボタン処理
+// 早押しボタン処理
 // 早押しボタン処理
 buzzerBtn.addEventListener("click", async () => {
     if (isOnlineMode) {
@@ -970,23 +972,24 @@ function listenToRoom(roomId) {
             return;
         }
 
-        if (data.status === "playing" && data.buzzerPlayer && !currentBuzzerPlayer) {
-            currentBuzzerPlayer = data.buzzerPlayer;
-            isBuzzed = true;
-            clearInterval(textInterval);
-            buzzerBtn.disabled = true;
+        
+           if (data.status === "playing" && data.buzzerPlayer && !currentBuzzerPlayer) {
+    currentBuzzerPlayer = data.buzzerPlayer;
+    isBuzzed = true;
+    clearInterval(textInterval);
+    buzzerBtn.disabled = true;
 
-            if (currentBuzzerPlayer === myPlayerName) {
-                resultMessageEl.textContent = "🔔 あなたがボタンを押しました！解答を選んでください。";
-                resultMessageEl.style.color = "#007aff";
-                showOptions();
-            } else {
-                resultMessageEl.textContent = `🔔 ${currentBuzzerPlayer} さんが早押しボタンを押しました！`;
-                resultMessageEl.style.color = "#ff9500";
-                optionsContainer.innerHTML = "";
-                optionsContainer.classList.add("hidden");
-            }
-        }
+    if (currentBuzzerPlayer === myPlayerName) {
+        resultMessageEl.textContent = "🔔 あなたがボタンを押しました！解答を選んでください。";
+        resultMessageEl.style.color = "#007aff";
+        showOptions(); // ← ここで確実に呼び出す
+    } else {
+        resultMessageEl.textContent = `🔔 ${currentBuzzerPlayer} さんが早押しボタンを押しました！`;
+        resultMessageEl.style.color = "#ff9500";
+        optionsContainer.innerHTML = "";
+        optionsContainer.classList.add("hidden");
+    }
+}
 
         if (data.status === "playing" && data.lastAnswerResult) {
             const res = data.lastAnswerResult;
