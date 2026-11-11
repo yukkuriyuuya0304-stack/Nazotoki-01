@@ -14,14 +14,21 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
+// 👤 端末固有のユーザーID管理（作成者判定用）
+let myUserId = localStorage.getItem("quiz_creator_user_id");
+if (!myUserId) {
+    myUserId = 'user_' + Math.random().toString(36).substr(2, 9) + Date.now();
+    localStorage.setItem("quiz_creator_user_id", myUserId);
+}
+
 const FIXED_TAGS = [
     "歴史", "地理", "理科・科学", "国語・文学", "数学・計算",
     "アニメ・漫画", "ゲーム", "芸能・エンタメ", "スポーツ", "雑学・その他"
 ];
 
 let allQuizData = [
-    { question: "日本の首都はどこでしょう？", options: ["東京", "大阪", "京都", "福岡"], answer: "東京", difficulty: "beginner", genres: ["地理", "雑学・その他"], packName: "デフォルト" },
-    { question: "太陽系で最も大きい惑星はどれでしょう？", options: ["木星", "地球", "火星", "土星"], answer: "木星", difficulty: "beginner", genres: ["理科・科学"], packName: "デフォルト" }
+    { question: "日本の首都はどこでしょう？", options: ["東京", "大阪", "京都", "福岡"], answer: "東京", difficulty: "beginner", genres: ["地理", "雑学・その他"], packName: "デフォルト", creatorId: "default" },
+    { question: "太陽系で最も大きい惑星はどれでしょう？", options: ["木星", "地球", "火星", "土星"], answer: "木星", difficulty: "beginner", genres: ["理科・科学"], packName: "デフォルト", creatorId: "default" }
 ];
 
 async function loadCloudQuestions() {
@@ -36,6 +43,7 @@ async function loadCloudQuestions() {
         console.log("クラウドから問題を読み込みました！総問題数:", allQuizData.length);
         updateReviewButtonState();
         populateLobbyGenreOptions();
+        checkMyPacksExistence(); // 本人用パックボタンの表示制御
     } catch (error) {
         console.error("問題の読み込みエラー:", error);
     }
@@ -85,6 +93,7 @@ const playerNameInput = document.getElementById("player-name");
 const genreButtonsContainer = document.getElementById("genre-buttons-container");
 const packButtonsContainer = document.getElementById("pack-buttons-container");
 const modeReviewBtn = document.getElementById("mode-review");
+const btnToPack = document.getElementById("btn-to-pack");
 const modeLabelEl = document.getElementById("mode-label");
 const questionNumberEl = document.getElementById("question-number");
 const questionTextEl = document.getElementById("question-text");
@@ -102,6 +111,7 @@ const onlineScoreboard = document.getElementById("online-scoreboard");
 const showRuleBtn = document.getElementById("show-rule-btn");
 const ruleModal = document.getElementById("rule-modal");
 const ruleModalBody = document.getElementById("rule-modal-body");
+const helpModal = document.getElementById("help-modal");
 
 // ロビー設定要素
 const lobbyWinCondition = document.getElementById("lobby-win-condition");
@@ -122,6 +132,7 @@ async function loadData() {
     updateReviewButtonState();
     renderHistory();
     await loadCloudQuestions();
+    updateKeyboardFocus();
 }
 
 function saveWrongQuestions() {
@@ -153,12 +164,28 @@ function renderHistory() {
 }
 window.addEventListener("DOMContentLoaded", loadData);
 
+// 本人が作成したパックが存在するか確認
+function checkMyPacksExistence() {
+    const myPacks = [...new Set(allQuizData.filter(q => q.creatorId === myUserId && q.packName).map(q => q.packName))];
+    if (myPacks.length > 0) {
+        btnToPack.classList.remove("hidden");
+    } else {
+        btnToPack.classList.add("hidden");
+    }
+    updateKeyboardFocus();
+}
+
+// モーダル制御
+document.getElementById("show-help-btn").addEventListener("click", () => helpModal.classList.remove("hidden"));
+document.getElementById("close-help-modal-btn").addEventListener("click", () => helpModal.classList.add("hidden"));
+
 // --- 問題作成 ---
 document.getElementById("btn-to-create").addEventListener("click", () => {
     selectedTags = [];
     renderFixedTagButtons();
     startScreen.classList.add("hidden");
     createScreen.classList.remove("hidden");
+    updateKeyboardFocus();
 });
 
 function renderFixedTagButtons() {
@@ -182,6 +209,7 @@ function renderFixedTagButtons() {
 document.getElementById("cancel-create-btn").addEventListener("click", () => {
     createScreen.classList.add("hidden");
     startScreen.classList.remove("hidden");
+    updateKeyboardFocus();
 });
 
 document.getElementById("submit-question-btn").addEventListener("click", async () => {
@@ -202,7 +230,8 @@ document.getElementById("submit-question-btn").addEventListener("click", async (
         answer: ans,
         difficulty: diff,
         genres: selectedTags,
-        packName: pack
+        packName: pack,
+        creatorId: myUserId // 作成者IDを付与
     };
 
     try {
@@ -220,24 +249,25 @@ document.getElementById("submit-question-btn").addEventListener("click", async (
         createScreen.classList.add("hidden");
         startScreen.classList.remove("hidden");
         populateLobbyGenreOptions();
+        checkMyPacksExistence();
     } catch (error) {
         console.error("保存エラー:", error);
         alert("保存に失敗しました。");
     }
 });
 
-// --- パック選択画面 ---
-document.getElementById("btn-to-pack").addEventListener("click", () => {
-    const packs = [...new Set(allQuizData.map(q => q.packName).filter(Boolean))];
+// --- パック選択画面（本人のみ） ---
+btnToPack.addEventListener("click", () => {
+    const myPacks = [...new Set(allQuizData.filter(q => q.creatorId === myUserId && q.packName).map(q => q.packName))];
     packButtonsContainer.innerHTML = "";
 
-    if (packs.length === 0) {
-        packButtonsContainer.innerHTML = "<p>作成されたカテゴリ（パック）はまだありません。</p>";
+    if (myPacks.length === 0) {
+        packButtonsContainer.innerHTML = "<p>作成したカテゴリはまだありません。</p>";
     } else {
-        packs.forEach(pack => {
+        myPacks.forEach(pack => {
             const btn = document.createElement("button");
             btn.textContent = pack;
-            btn.className = "mode-btn";
+            btn.className = "mode-btn nav-item";
             btn.style.backgroundColor = "#5856d6";
             btn.addEventListener("click", () => {
                 selectedPack = pack;
@@ -249,11 +279,13 @@ document.getElementById("btn-to-pack").addEventListener("click", () => {
 
     startScreen.classList.add("hidden");
     packScreen.classList.remove("hidden");
+    updateKeyboardFocus();
 });
 
 document.getElementById("back-from-pack-btn").addEventListener("click", () => {
     packScreen.classList.add("hidden");
     startScreen.classList.remove("hidden");
+    updateKeyboardFocus();
 });
 
 // --- シングルプレイ ゲームロジック ---
@@ -276,10 +308,10 @@ function updateReviewButtonState() {
     const filteredWrong = filterByDifficulty(wrongQuestions);
     if (filteredWrong.length > 0) {
         modeReviewBtn.disabled = false;
-        modeReviewBtn.querySelector("small").textContent = `該当する問題: ${filteredWrong.length}問`;
+        modeReviewBtn.querySelector("small").textContent = `該当問題: ${filteredWrong.length}問`;
     } else {
         modeReviewBtn.disabled = true;
-        modeReviewBtn.querySelector("small").textContent = `該当する問題はありません`;
+        modeReviewBtn.querySelector("small").textContent = `該当問題なし`;
     }
 }
 difficultySelect.addEventListener("change", updateReviewButtonState);
@@ -291,7 +323,7 @@ document.getElementById("btn-to-genre").addEventListener("click", () => {
     FIXED_TAGS.forEach(genre => {
         const btn = document.createElement("button");
         btn.textContent = genre;
-        btn.className = "mode-btn";
+        btn.className = "mode-btn nav-item";
         const hasQuestions = diffFiltered.some(q => (q.genres && q.genres.includes(genre)) || q.genre === genre);
         
         if (hasQuestions) {
@@ -310,11 +342,13 @@ document.getElementById("btn-to-genre").addEventListener("click", () => {
     
     startScreen.classList.add("hidden");
     genreScreen.classList.remove("hidden");
+    updateKeyboardFocus();
 });
 
 document.getElementById("back-to-start-btn").addEventListener("click", () => {
     genreScreen.classList.add("hidden");
     startScreen.classList.remove("hidden");
+    updateKeyboardFocus();
 });
 
 function initMode(mode) {
@@ -325,7 +359,7 @@ function initMode(mode) {
     
     let sourceData = mode === 'review' ? wrongQuestions 
         : mode === 'genre' ? allQuizData.filter(q => (q.genres && q.genres.includes(selectedGenre)) || q.genre === selectedGenre)
-        : mode === 'pack' ? allQuizData.filter(q => q.packName === selectedPack)
+        : mode === 'pack' ? allQuizData.filter(q => q.packName === selectedPack && q.creatorId === myUserId)
         : allQuizData;
 
     activeQuizData = filterByDifficulty(sourceData);
@@ -350,7 +384,7 @@ document.getElementById("mode-normal").addEventListener("click", () => initMode(
 document.getElementById("mode-suddendeath").addEventListener("click", () => initMode('suddendeath'));
 modeReviewBtn.addEventListener("click", () => initMode('review'));
 
-// 問題の開始・再開
+// 問題の開始
 function startQuestion(fromIndex = 0) {
     isBuzzed = false;
     currentBuzzerPlayer = null;
@@ -370,7 +404,6 @@ function startQuestion(fromIndex = 0) {
     timerBar.classList.remove("timer-warning");
     nextCountdownText.classList.add("hidden");
     
-    // 解答権剥奪チェック
     if (isOnlineMode && roomDataCache && roomDataCache.answeredPlayers && roomDataCache.answeredPlayers.includes(myPlayerName)) {
         buzzerBtn.disabled = true;
     } else {
@@ -393,6 +426,8 @@ function startQuestion(fromIndex = 0) {
             startNoBuzzerTimer(); 
         }
     }, 100);
+    
+    updateKeyboardFocus();
 }
 
 function startNoBuzzerTimer() {
@@ -400,7 +435,7 @@ function startNoBuzzerTimer() {
 }
 
 document.getElementById("quit-btn").addEventListener("click", () => {
-    if (confirm("クイズを中断してトップに戻りますか？\n（スコアは記録されません）")) {
+    if (confirm("クイズを中断してトップに戻りますか？")) {
         clearInterval(textInterval);
         clearInterval(answerTimer);
         clearInterval(nextCountdownInterval);
@@ -409,6 +444,7 @@ document.getElementById("quit-btn").addEventListener("click", () => {
         quizScreen.classList.add("hidden");
         startScreen.classList.remove("hidden");
         updateReviewButtonState();
+        updateKeyboardFocus();
     }
 });
 
@@ -419,12 +455,13 @@ function showOptions() {
     shuffledOptions.forEach((option, index) => {
         const btn = document.createElement("button");
         btn.textContent = `${index + 1}. ${option}`;
-        btn.className = "option-btn";
+        btn.className = "option-btn nav-item";
         btn.addEventListener("click", () => checkAnswer(option));
         optionsContainer.appendChild(btn);
     });
     optionsContainer.classList.remove("hidden");
     startTimer(MAX_TIME_MS, () => handleTimeOut()); 
+    updateKeyboardFocus(0); // 1番目の選択肢にフォーカス
 }
 
 function startTimer(durationMs, onTimeOut) {
@@ -628,6 +665,22 @@ function startNextCountdown(seconds, callback) {
     }, 1000);
 }
 
+// ⏩ オフライン専用：Qキーによる問題スキップ処理
+function skipQuestionOffline() {
+    if (isOnlineMode) return; // オンライン時は無効
+    clearInterval(textInterval);
+    clearInterval(answerTimer);
+    clearInterval(nextCountdownInterval);
+    clearTimeout(autoNextTimer);
+    
+    currentQuestionIndex++;
+    if (currentQuestionIndex < activeQuizData.length) {
+        startQuestion();
+    } else {
+        showResult(false);
+    }
+}
+
 function recordWrongQuestion(question) {
     if (!wrongQuestions.some(q => q.question === question.question)) {
         wrongQuestions.push(question);
@@ -671,20 +724,20 @@ function showResult(isSuddenDeathGameOver, onlineScores = null) {
     clearInterval(nextCountdownInterval);
 
     if (isOnlineMode && onlineScores) {
-        document.getElementById("result-title").textContent = "🏆 対戦結果（ランキング）";
+        document.getElementById("result-title").textContent = "🏆 対戦結果";
         const sorted = Object.entries(onlineScores).sort((a, b) => b[1] - a[1]);
-        let resultHTML = "<ol style='text-align: left; display: inline-block;'>";
+        let resultHTML = "<ol style='text-align: left; display: inline-block; padding-left: 20px;'>";
         sorted.forEach(([name, sc], index) => {
             const crown = index === 0 ? "🥇 " : index === 1 ? "🥈 " : index === 2 ? "🥉 " : "👤 ";
-            resultHTML += `<li style='margin: 8px 0; font-size: 1.2em;'>${crown}<strong>${name}</strong>: ${sc}問正解</li>`;
+            resultHTML += `<li style='margin: 4px 0; font-size: 1.1em;'>${crown}<strong>${name}</strong>: ${sc}点</li>`;
             if (name === myPlayerName) score = sc;
         });
         resultHTML += "</ol>";
 
         resultHTML += `
-            <div style="margin-top: 20px;">
-                <button id="rematch-btn" class="mode-btn" style="background-color: #ff9500;">🔄 もう一度遊ぶ（再戦）</button>
-                <p id="rematch-status" style="font-size: 0.9em; color: #666;"></p>
+            <div style="margin-top: 10px;">
+                <button id="rematch-btn" class="mode-btn nav-item" style="background-color: #ff9500;">🔄 もう一度遊ぶ（再戦）</button>
+                <p id="rematch-status" style="font-size: 0.85em; color: #666;"></p>
             </div>
         `;
         document.getElementById("final-score").innerHTML = resultHTML;
@@ -707,6 +760,7 @@ function showResult(isSuddenDeathGameOver, onlineScores = null) {
         document.getElementById("final-score").textContent = isSuddenDeathGameOver ? `記録: ${score}問連続正解でした！` : `${activeQuizData.length}問中、${score}問正解しました！`;
         saveHistory(currentMode, difficultySelect.value, score, activeQuizData.length);
     }
+    updateKeyboardFocus();
 }
 
 document.getElementById("back-home-btn").addEventListener("click", () => {
@@ -716,6 +770,7 @@ document.getElementById("back-home-btn").addEventListener("click", () => {
     resultScreen.classList.add("hidden");
     startScreen.classList.remove("hidden");
     updateReviewButtonState();
+    updateKeyboardFocus();
 });
 
 // ==========================================
@@ -843,6 +898,7 @@ function showLobby(roomId, hostState) {
         startRoomMatchBtn.classList.add("hidden");
         guestRuleNotice.classList.remove("hidden");
     }
+    updateKeyboardFocus();
 }
 
 startRoomMatchBtn.addEventListener("click", async () => {
@@ -906,9 +962,7 @@ showRuleBtn.addEventListener("click", () => {
     `;
     ruleModal.classList.remove("hidden");
 });
-document.getElementById("close-rule-modal-btn").addEventListener("click", () => {
-    ruleModal.classList.add("hidden");
-});
+document.getElementById("close-rule-modal-btn").addEventListener("click", () => ruleModal.classList.add("hidden"));
 
 function listenToRoom(roomId) {
     const roomRef = doc(db, "rooms", roomId);
@@ -930,8 +984,6 @@ function listenToRoom(roomId) {
             data.players.forEach(player => {
                 const li = document.createElement("li");
                 li.textContent = player === data.host ? `👑 ${player}` : `👤 ${player}`;
-                li.style.padding = "5px 0";
-                li.style.borderBottom = "1px solid #ddd";
                 playersListEl.appendChild(li);
             });
             return;
@@ -965,7 +1017,6 @@ function listenToRoom(roomId) {
             return;
         }
 
-        // オンライン早押し検知処理（修正ポイント）
         if (data.status === "playing" && data.buzzerPlayer && currentBuzzerPlayer !== data.buzzerPlayer) {
             currentBuzzerPlayer = data.buzzerPlayer;
             isBuzzed = true;
@@ -973,11 +1024,11 @@ function listenToRoom(roomId) {
             buzzerBtn.disabled = true;
 
             if (currentBuzzerPlayer === myPlayerName) {
-                resultMessageEl.textContent = "🔔 あなたがボタンを押しました！解答を選んでください。";
+                resultMessageEl.textContent = "🔔 あなたがボタンを押しました！";
                 resultMessageEl.style.color = "#007aff";
-                showOptions(); // 自分で押した場合に選択肢を表示
+                showOptions();
             } else {
-                resultMessageEl.textContent = `🔔 ${currentBuzzerPlayer} さんが早押しボタンを押しました！`;
+                resultMessageEl.textContent = `🔔 ${currentBuzzerPlayer} さんがボタンを押しました！`;
                 resultMessageEl.style.color = "#ff9500";
                 optionsContainer.innerHTML = "";
                 optionsContainer.classList.add("hidden");
@@ -988,7 +1039,7 @@ function listenToRoom(roomId) {
             const res = data.lastAnswerResult;
             
             if (res.isCorrect) {
-                resultMessageEl.textContent = `⭕ ${res.player} さんが正解しました！ (${res.answer})`;
+                resultMessageEl.textContent = `⭕ ${res.player} さんが正解！ (${res.answer})`;
                 resultMessageEl.style.color = "#34c759";
                 startNextCountdown(4);
                 if (isHost) scheduleAutoNextQuestion();
@@ -1003,13 +1054,12 @@ function listenToRoom(roomId) {
             } 
             else {
                 const penaltyMsg = data.settings?.penalty === "minus1" ? " (-1点)" : "";
-                resultMessageEl.textContent = `❌ ${res.player} さんが不正解${penaltyMsg}！問題文が続きます...`;
+                resultMessageEl.textContent = `❌ ${res.player} さんが不正解${penaltyMsg}！続きます...`;
                 resultMessageEl.style.color = "#ff9500";
                 
                 setTimeout(() => {
                     if (data.status === "playing" && data.currentQuestionIndex === currentQuestionIndex && !data.lastAnswerResult?.isCorrect && !data.allWrongOrPassed) {
                         currentBuzzerPlayer = null;
-                        
                         if (isHost) {
                             updateDoc(roomRef, {
                                 buzzerPlayer: null,
@@ -1017,7 +1067,6 @@ function listenToRoom(roomId) {
                                 resumeIndex: data.buzzIndex || 0
                             });
                         }
-                        
                         startQuestion(data.buzzIndex || 0);
                     }
                 }, 2000);
@@ -1032,7 +1081,7 @@ function listenToRoom(roomId) {
             const votes = data.rematchVotes || [];
             const rematchStatusEl = document.getElementById("rematch-status");
             if (rematchStatusEl) {
-                rematchStatusEl.textContent = `連戦準備状況: ${votes.length} / ${data.players.length} 人が準備完了`;
+                rematchStatusEl.textContent = `再戦準備: ${votes.length} / ${data.players.length} 人`;
             }
 
             if (isHost && votes.length >= data.players.length && votes.length > 0) {
@@ -1048,29 +1097,98 @@ document.getElementById("leave-room-btn").addEventListener("click", () => {
     isOnlineMode = false;
     lobbyScreen.classList.add("hidden");
     startScreen.classList.remove("hidden");
+    updateKeyboardFocus();
 });
 
-// キーボード操作
+// ==========================================
+// ⌨️ 全画面共通 キーボードナビゲーションシステム
+// ==========================================
+let focusIndex = 0;
+
+function getVisibleNavItems() {
+    // 現在表示されている画面の中にあるクリック可能な .nav-item を全取得
+    const visibleScreens = [startScreen, genreScreen, packScreen, createScreen, quizScreen, resultScreen, lobbyScreen];
+    const currentScreen = visibleScreens.find(s => !s.classList.contains("hidden"));
+    if (!currentScreen) return [];
+    
+    // クイズ画面かつ選択肢表示中なら選択肢のみをナビ対象にする
+    if (currentScreen === quizScreen && !optionsContainer.classList.contains("hidden")) {
+        return Array.from(optionsContainer.querySelectorAll(".nav-item:not(:disabled)"));
+    }
+    
+    return Array.from(currentScreen.querySelectorAll(".nav-item:not(.hidden):not(:disabled)"));
+}
+
+function updateKeyboardFocus(setIndex = null) {
+    const items = getVisibleNavItems();
+    items.forEach(el => el.classList.remove("kb-focused"));
+    if (items.length === 0) return;
+    
+    if (setIndex !== null) focusIndex = setIndex;
+    if (focusIndex < 0) focusIndex = 0;
+    if (focusIndex >= items.length) focusIndex = items.length - 1;
+
+    items[focusIndex].classList.add("kb-focused");
+}
+
 document.addEventListener("keydown", (e) => {
+    // モーダル表示中はモーダルの操作を優先
+    if (!helpModal.classList.contains("hidden") || !ruleModal.classList.contains("hidden")) {
+        if (e.code === "Enter" || e.code === "Space" || e.code === "Escape") {
+            helpModal.classList.add("hidden");
+            ruleModal.classList.add("hidden");
+        }
+        return;
+    }
+
+    // フォーム入力中はキー操作を無効化
     if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) return;
 
-    if (!quizScreen.classList.contains("hidden")) {
-        if (e.code === "Space" || e.code === "Enter") {
-            e.preventDefault();
+    const key = e.code;
+    const items = getVisibleNavItems();
+
+    // 1. 上下矢印 / W S キーによるフォーカス移動
+    if (key === "ArrowUp" || key === "KeyW") {
+        e.preventDefault();
+        if (items.length > 0) {
+            focusIndex = (focusIndex - 1 + items.length) % items.length;
+            updateKeyboardFocus();
+        }
+    } else if (key === "ArrowDown" || key === "KeyS") {
+        e.preventDefault();
+        if (items.length > 0) {
+            focusIndex = (focusIndex + 1) % items.length;
+            updateKeyboardFocus();
+        }
+    }
+
+    // 2. Space / Enter キーによる決定・早押し
+    else if (key === "Space" || key === "Enter") {
+        e.preventDefault();
+        // クイズ画面で早押しボタンが有効な時は早押しを優先
+        if (!quizScreen.classList.contains("hidden") && optionsContainer.classList.contains("hidden")) {
             if (!buzzerBtn.disabled) buzzerBtn.click();
+        } else if (items.length > 0 && items[focusIndex]) {
+            items[focusIndex].click();
         }
+    }
 
-        if (!optionsContainer.classList.contains("hidden")) {
-            const optionButtons = optionsContainer.querySelectorAll(".option-btn");
-            let selectedIndex = -1;
-            if (e.code === "Digit1" || e.code === "Numpad1") selectedIndex = 0;
-            if (e.code === "Digit2" || e.code === "Numpad2") selectedIndex = 1;
-            if (e.code === "Digit3" || e.code === "Numpad3") selectedIndex = 2;
-            if (e.code === "Digit4" || e.code === "Numpad4") selectedIndex = 3;
+    // 3. 数字キー 1〜4 (選択肢ダイレクト選択)
+    else if (!quizScreen.classList.contains("hidden") && !optionsContainer.classList.contains("hidden")) {
+        const optionButtons = optionsContainer.querySelectorAll(".option-btn");
+        let selectedIndex = -1;
+        if (key === "Digit1" || key === "Numpad1") selectedIndex = 0;
+        if (key === "Digit2" || key === "Numpad2") selectedIndex = 1;
+        if (key === "Digit3" || key === "Numpad3") selectedIndex = 2;
+        if (key === "Digit4" || key === "Numpad4") selectedIndex = 3;
 
-            if (selectedIndex !== -1 && optionButtons[selectedIndex] && !optionButtons[selectedIndex].disabled) {
-                optionButtons[selectedIndex].click();
-            }
+        if (selectedIndex !== -1 && optionButtons[selectedIndex] && !optionButtons[selectedIndex].disabled) {
+            optionButtons[selectedIndex].click();
         }
+    }
+
+    // 4. Q キー：オフライン限定即時問題スキップ
+    else if (key === "KeyQ" && !quizScreen.classList.contains("hidden")) {
+        skipQuestionOffline();
     }
 });
